@@ -1,48 +1,81 @@
 # Email Scheduler
 
-A recruiter-ready full-stack email scheduling application built with React, Express, MongoDB, Redis, BullMQ, JWT authentication, and Ethereal Email.
+A full-stack email scheduling application that lets users compose emails, schedule them for later delivery, and track scheduled and sent emails from a simple dashboard.
 
-## Features
+The project uses **Express.js** for the backend API, **MongoDB** for persistent application data, **Redis + BullMQ** for scheduling and background job processing, and **Ethereal Email** for safe email testing during development.
+
+---
+
+## Tech Stack
 
 ### Backend
-- JWT authentication
-- Schedule emails for a future date/time
-- MongoDB persistence for users and email records
-- Redis + BullMQ delayed jobs
-- Dedicated BullMQ worker
-- Configurable worker concurrency
-- API rate limiting
-- Email status tracking: `SCHEDULED`, `PROCESSING`, `SENT`, `FAILED`
-- Ethereal Email/Nodemailer integration
-- CORS, Helmet, validation and centralized error handling
-- Health endpoint
+
+* Node.js
+* Express.js
+* MongoDB
+* Redis
+* BullMQ
+* Nodemailer
+* JWT Authentication
 
 ### Frontend
-- Login/register
-- Dashboard summary
-- Compose and schedule email
-- Scheduled email table
-- Sent email table
-- Failed email table
-- Refresh controls
-- Responsive UI
-- Protected routes
+
+* React
+* JavaScript
+* HTML
+* CSS
+
+### Infrastructure
+
+* Docker / Docker Compose
+* Ethereal Email for SMTP testing
 
 ---
 
-# 1. Prerequisites
+# Project Structure
 
-Install:
-
-- Node.js 20+
-- Docker Desktop
-- Git
-
-No local Redis or MongoDB installation is required if Docker Desktop is available.
+```text
+email-scheduler/
+│
+├── backend/
+│   ├── src/
+│   │   ├── server.js
+│   │   ├── worker.js
+│   │   └── ...
+│   ├── package.json
+│   └── .env
+│
+├── frontend/
+│   ├── src/
+│   ├── package.json
+│   └── ...
+│
+├── docker-compose.yml
+├── .env.example
+├── .gitignore
+└── README.md
+```
 
 ---
 
-# 2. Start Redis and MongoDB
+# Prerequisites
+
+Make sure the following are installed:
+
+* Node.js 18+
+* npm
+* Docker Desktop
+* Git
+
+MongoDB and Redis can be started through Docker Compose, so they don't need to be installed separately.
+
+---
+
+# Running the Project
+
+There are two ways to run the backend dependencies.
+
+## Option 1 — Docker Compose
 
 From the project root:
 
@@ -50,405 +83,497 @@ From the project root:
 docker compose up -d
 ```
 
-Check:
+This starts the services configured in `docker-compose.yml`.
+
+Check the running containers:
 
 ```bash
-docker ps
+docker compose ps
 ```
 
-You should see:
+To stop them:
 
-- `email-scheduler-redis`
-- `email-scheduler-mongo`
+```bash
+docker compose down
+```
 
 ---
 
-# 3. Backend setup
+# Backend Setup
+
+Open a terminal in the backend directory:
 
 ```bash
 cd backend
+```
+
+Install dependencies:
+
+```bash
 npm install
 ```
 
-Copy the environment template:
+Create a `.env` file:
 
-Windows CMD:
+```env
+PORT=5000
 
-```cmd
-copy .env.example .env
+MONGO_URI=mongodb://localhost:27017/email_scheduler
+
+REDIS_HOST=localhost
+REDIS_PORT=6379
+
+JWT_SECRET=your_jwt_secret
+
+SMTP_HOST=smtp.ethereal.email
+SMTP_PORT=587
+SMTP_USER=your_ethereal_username
+SMTP_PASS=your_ethereal_password
 ```
 
-PowerShell:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-Start the API:
+Start the Express server:
 
 ```bash
-npm run dev
+npm start
 ```
 
-The API runs on:
+The backend API will normally be available at:
 
 ```text
 http://localhost:5000
 ```
 
-Start the BullMQ worker in a second terminal:
+---
+
+# Starting the BullMQ Worker
+
+The API and the worker are separate processes.
+
+Open another terminal:
+
+```bash
+cd backend
+```
+
+Then run:
+
+```bash
+npm run worker
+```
+
+The worker connects to Redis and listens for scheduled email jobs.
+
+A successful startup should look similar to:
+
+```text
+MongoDB connected
+Worker ready with concurrency=5
+```
+
+Keeping the worker running is important because it is responsible for processing scheduled jobs and sending the emails.
+
+---
+
+# Frontend Setup
+
+Open another terminal:
+
+```bash
+cd frontend
+```
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the development server:
+
+```bash
+npm run dev
+```
+
+The frontend will normally be available at the URL shown by the frontend development server, commonly:
+
+```text
+http://localhost:5173
+```
+
+Make sure the backend is running before using features that require API access.
+
+---
+
+# Ethereal Email Setup
+
+For development and testing, this project can use **Ethereal Email** instead of sending emails to real inboxes.
+
+Ethereal provides a fake SMTP service where sent messages can be viewed through a browser preview.
+
+## Creating an Ethereal Account
+
+Visit:
+
+https://ethereal.email/
+
+Create a test account and copy the SMTP credentials.
+
+Add them to the backend `.env` file:
+
+```env
+SMTP_HOST=smtp.ethereal.email
+SMTP_PORT=587
+SMTP_USER=your_ethereal_username
+SMTP_PASS=your_ethereal_password
+```
+
+Restart the backend/worker after changing environment variables.
+
+When an email is processed successfully, the worker can provide an Ethereal preview URL similar to:
+
+```text
+Email sent successfully
+Preview: https://ethereal.email/message/...
+```
+
+Opening the preview URL allows you to inspect the email.
+
+### Development fallback
+
+If SMTP credentials are not supplied, the application can create a temporary Ethereal account automatically. This is useful for quickly testing the scheduler without configuring a permanent SMTP account.
+
+For production, real SMTP credentials or a transactional email provider should be configured instead.
+
+---
+
+# How Scheduling Works
+
+The scheduling flow is divided between the API, database, Redis, and the background worker.
+
+```text
+User
+  │
+  ▼
+Frontend
+  │
+  ▼
+Express API
+  │
+  ├──────────────► MongoDB
+  │                Stores email/job information
+  │
+  ▼
+BullMQ
+  │
+  ▼
+Redis
+  │
+  │ delayed job
+  ▼
+Worker
+  │
+  ▼
+Nodemailer
+  │
+  ▼
+SMTP / Ethereal
+  │
+  ▼
+Email
+```
+
+### Step-by-step
+
+1. The user creates an email from the frontend.
+2. The frontend sends the request to the Express API.
+3. The backend validates the request and stores the email information in MongoDB.
+4. A BullMQ job is created with the requested scheduled time.
+5. Redis stores the BullMQ job and handles the delayed-job state.
+6. When the scheduled time is reached, the worker receives the job.
+7. The worker sends the email using Nodemailer.
+8. The email status is updated after processing.
+9. The user can see the updated status from the dashboard.
+
+This keeps email processing outside the normal HTTP request so the API doesn't have to remain busy waiting for a scheduled email.
+
+---
+
+# Persistence and Restart Handling
+
+Persistence is handled at two levels.
+
+### MongoDB
+
+MongoDB stores the application's email and scheduling information.
+
+This means the application's data isn't dependent on the Node.js process remaining alive.
+
+For example:
+
+```text
+Email
+├── recipient
+├── subject
+├── body
+├── scheduledAt
+└── status
+```
+
+### Redis + BullMQ
+
+BullMQ uses Redis to maintain the queue and delayed-job information.
+
+The worker can therefore process queued jobs independently from the API server.
+
+With persistent Docker volumes configured for the database/queue services, the underlying data can also survive container restarts.
+
+On application restart, the worker reconnects to Redis and continues processing available jobs.
+
+The database also provides the source of truth for the application's email records and statuses.
+
+---
+
+# Rate Limiting
+
+The backend includes rate limiting to prevent clients from sending an excessive number of API requests within a short period.
+
+This helps protect endpoints from accidental request floods and basic abuse.
+
+The rate limiter is applied at the API layer before requests reach the scheduling logic.
+
+Conceptually:
+
+```text
+Client
+   │
+   ▼
+Rate Limiter
+   │
+   ├── Request allowed ──► API
+   │
+   └── Limit exceeded ──► 429 Response
+```
+
+This keeps rate-control logic separate from the email processing worker.
+
+---
+
+# Worker Concurrency
+
+The BullMQ worker is configured with a concurrency of **5**.
+
+Example startup message:
+
+```text
+Worker ready with concurrency=5
+```
+
+This means the worker can process up to five jobs concurrently instead of processing every email strictly one after another.
+
+```text
+             Worker
+               │
+       ┌───────┼───────┐
+       ▼       ▼       ▼
+     Job 1   Job 2   Job 3
+       ▼       ▼       ▼
+     Job 4   Job 5
+```
+
+Concurrency improves throughput when multiple emails become ready around the same time while still putting a controlled limit on simultaneous processing.
+
+---
+
+# Features Implemented
+
+## Backend
+
+### Authentication
+
+* User registration/login
+* JWT-based authentication
+* Protected API routes
+
+### Email Scheduler
+
+* Create scheduled emails
+* Schedule emails for future delivery
+* Process delayed jobs through BullMQ
+* Send emails using Nodemailer
+* Track email processing status
+
+### Persistence
+
+* MongoDB-based data storage
+* Email records persist independently of the frontend
+* Redis-backed BullMQ queue
+* Worker can reconnect after application restarts
+
+### Rate Limiting
+
+* API request rate limiting
+* Prevents excessive requests to backend endpoints
+* Returns appropriate rate-limit responses
+
+### Concurrency
+
+* BullMQ worker concurrency configured to 5
+* Multiple ready email jobs can be processed concurrently
+* Keeps the number of simultaneous email-processing tasks controlled
+
+### Background Processing
+
+* Email sending is handled by a dedicated worker
+* API and worker run independently
+* Scheduled jobs do not block normal API requests
+
+---
+
+# Frontend
+
+### Login
+
+* User login interface
+* Authentication handling
+* Protected application area
+
+### Dashboard
+
+* Overview of scheduled emails
+* Email status information
+* Quick access to scheduling functionality
+
+### Compose Email
+
+* Recipient field
+* Subject
+* Email body
+* Schedule date/time
+* Form validation
+
+### Email Tables
+
+* Display scheduled emails
+* Display email status
+* View relevant email information in a structured table
+
+### Scheduling
+
+* Select a future date and time
+* Submit scheduled emails to the backend
+* Track the scheduled email after creation
+
+### User Experience
+
+* Clear forms and validation
+* Loading states
+* Success/error feedback
+* Responsive interface
+
+---
+
+# Useful Commands
+
+### Start Docker services
+
+```bash
+docker compose up -d
+```
+
+### Check Docker services
+
+```bash
+docker compose ps
+```
+
+### View service logs
+
+```bash
+docker compose logs -f
+```
+
+### Stop Docker services
+
+```bash
+docker compose down
+```
+
+### Start backend
+
+```bash
+cd backend
+npm start
+```
+
+### Start worker
 
 ```bash
 cd backend
 npm run worker
 ```
 
----
-
-# 4. Ethereal Email setup
-
-Ethereal is a fake SMTP service designed for testing email flows without sending real production email.
-
-1. Go to `https://ethereal.email`
-2. Create a test account.
-3. Copy the SMTP username and password.
-4. Put them in `backend/.env`.
-
-Example:
-
-```env
-SMTP_HOST=smtp.ethereal.email
-SMTP_PORT=587
-SMTP_SECURE=false
-SMTP_USER=your_ethereal_username
-SMTP_PASSWORD=your_ethereal_password
-MAIL_FROM="Email Scheduler <no-reply@example.test>"
-```
-
-If SMTP credentials are left empty, the worker will attempt to create a temporary Ethereal account automatically and print the generated account details in the worker terminal.
-
-After an email is sent, the worker prints an Ethereal preview URL.
-
----
-
-# 5. Frontend setup
-
-Open another terminal:
+### Start frontend
 
 ```bash
 cd frontend
-npm install
 npm run dev
 ```
 
-Open:
+---
+
+# Testing the Scheduler
+
+A simple way to verify the complete flow is to schedule an email a few minutes into the future.
+
+For example:
 
 ```text
-http://localhost:5173
+Current time: 10:00
+Scheduled time: 10:05
 ```
 
-The frontend expects:
-
-```env
-VITE_API_URL=http://localhost:5000/api
-```
-
-The included `.env.example` already contains this value.
-
----
-
-# 6. Architecture
-
-```text
-                         ┌───────────────────┐
-                         │      React        │
-                         │     Frontend      │
-                         └─────────┬─────────┘
-                                   │ HTTP/JWT
-                                   ▼
-                         ┌───────────────────┐
-                         │     Express       │
-                         │       API         │
-                         └──────┬─────┬──────┘
-                                │     │
-                         records│     │jobs
-                                ▼     ▼
-                         ┌─────────┐ ┌───────────┐
-                         │ MongoDB │ │   Redis   │
-                         │persist. │ │  BullMQ   │
-                         └─────────┘ └─────┬─────┘
-                                           │
-                                           ▼
-                                  ┌────────────────┐
-                                  │ BullMQ Worker  │
-                                  │ concurrency=N  │
-                                  └───────┬────────┘
-                                          │ SMTP
-                                          ▼
-                                  ┌────────────────┐
-                                  │ Ethereal Email │
-                                  └────────────────┘
-```
-
-## How scheduling works
-
-1. The user submits an email and future `scheduledAt`.
-2. Express validates the request and stores an email document in MongoDB.
-3. Express creates a BullMQ delayed job in Redis using the email ID as the job ID.
-4. BullMQ keeps the delayed job until its delay expires.
-5. The worker receives the job.
-6. The worker marks the database record `PROCESSING`.
-7. Nodemailer sends the email through Ethereal SMTP.
-8. The worker marks the record `SENT` and stores the preview URL.
-
-## Persistence after restart
-
-Persistence exists at two levels:
-
-### Database
-MongoDB stores:
-- user
-- recipient
-- subject
-- body
-- scheduled time
-- status
-- timestamps
-- error/preview information
-
-### Queue
-BullMQ stores delayed job information in Redis. Redis is configured with AOF persistence in Docker Compose.
-
-Therefore, stopping/restarting the Node API does not remove future scheduled jobs.
-
-Important distinction:
-
-- MongoDB = source of truth for email records/status.
-- Redis/BullMQ = source of truth for queued/delayed execution work.
-
-The worker can be stopped and restarted while Redis retains delayed jobs.
-
-## Rate limiting
-
-The API uses `express-rate-limit`.
-
-Configured values are controlled through:
-
-```env
-RATE_LIMIT_WINDOW_MS=60000
-RATE_LIMIT_MAX=100
-```
-
-This means a client can make up to 100 requests in the configured one-minute window before receiving HTTP 429.
-
-Login/register also use a stricter limiter.
-
-## Concurrency
-
-The worker uses BullMQ concurrency:
-
-```env
-WORKER_CONCURRENCY=5
-```
-
-At most five jobs can be actively processed by the worker at the same time.
-
-If more jobs are ready than available worker slots, remaining jobs wait in the queue.
-
----
-
-# 7. API endpoints
-
-## Authentication
-
-```text
-POST /api/auth/register
-POST /api/auth/login
-GET  /api/auth/me
-```
-
-## Emails
-
-```text
-POST /api/emails/schedule
-GET  /api/emails
-GET  /api/emails/scheduled
-GET  /api/emails/sent
-GET  /api/emails/failed
-GET  /api/emails/:id
-DELETE /api/emails/:id
-```
-
-## Health
-
-```text
-GET /health
-```
-
----
-
-# 8. Demo video — maximum 5 minutes
-
-Record one video and place it at:
-
-```text
-demo/email-scheduler-demo.mp4
-```
-
-Recommended timeline:
-
-### 0:00–0:30
-Introduce the stack and architecture.
-
-### 0:30–1:15
-Register/login and show the dashboard.
-
-### 1:15–2:00
-Compose an email and schedule it for 30–60 seconds in the future.
-
-Show the Scheduled table.
-
-### 2:00–3:20
-Perform the restart test:
-
-1. Schedule a future email.
-2. Stop the API and/or worker.
-3. Start them again.
-4. Show that the scheduled record still exists.
-5. Wait until the scheduled time.
-6. Show the worker processing the job.
-7. Show the Sent table.
-8. Open the Ethereal preview URL.
-
-### 3:20–4:10
-Demonstrate concurrency/rate limiting if time allows.
-
-### 4:10–4:50
-Briefly show:
-- queue configuration
-- worker
-- rate limiter
-- database model
-
-### 4:50–5:00
-Summarize persistence and trade-offs.
-
----
-
-# 9. Submission checklist
-
-Before sharing the repository:
-
-- [ ] Repository is PRIVATE
-- [ ] `Mitrajit` has access
-- [ ] `Yadav036` has access
-- [ ] `.env` is NOT committed
-- [ ] `.env.example` IS committed
-- [ ] README is complete
-- [ ] Backend starts successfully
-- [ ] Worker starts successfully
-- [ ] Frontend starts successfully
-- [ ] Redis starts successfully
-- [ ] MongoDB starts successfully
-- [ ] Registration works
-- [ ] Login works
-- [ ] Email scheduling works
-- [ ] Scheduled table works
-- [ ] Sent table works
-- [ ] Failed table works
-- [ ] Restart scenario works
-- [ ] Ethereal preview works
-- [ ] Rate limiting works
-- [ ] Concurrency is configurable
-- [ ] Demo video is <= 5 minutes
-- [ ] Assumptions/trade-offs are documented
-
----
-
-# 10. Assumptions and trade-offs
-
-1. Ethereal Email is used instead of a production email provider because this is a development/assessment project.
-2. MongoDB stores application state and email records.
-3. Redis/BullMQ stores scheduled execution jobs.
-4. Redis uses AOF in Docker for persistence.
-5. Worker concurrency is configurable rather than hard-coded.
-6. The application uses at-least-once style job processing. A real production system would add stronger idempotency/provider-level safeguards to eliminate duplicate delivery in crash-after-send scenarios.
-7. Rate-limit values are intentionally configurable for testing.
-8. Email bodies are stored as plain text for simplicity.
-9. Authentication uses JWT stored by the browser for this assessment. A production application may prefer secure, HTTP-only cookies depending on its security architecture.
-
----
-
-# 11. Suggested Git history
-
-Use meaningful commits rather than one giant commit:
-
-```text
-feat: initialize backend and frontend
-feat: add authentication
-feat: add email scheduling API
-feat: add BullMQ delayed jobs
-feat: add persistent MongoDB email records
-feat: add email worker and Ethereal SMTP
-feat: add rate limiting and concurrency controls
-feat: build scheduling dashboard
-feat: add scheduled and sent email tables
-docs: add setup and architecture documentation
-docs: add demo video
-```
-
----
-
-# 12. Final submission message
-
-After granting repository access, send:
-
-> Hi,
->
-> I have completed the Email Scheduler assignment and added the implementation to the private GitHub repository.
->
-> The project includes:
-> - Express backend
-> - MongoDB persistence
-> - Redis + BullMQ scheduling
-> - Dedicated worker with configurable concurrency
-> - API rate limiting
-> - Ethereal Email integration
-> - React frontend with authentication, dashboard, compose, scheduled and sent email views
-> - Restart/persistence handling
-> - README with setup, architecture, assumptions and trade-offs
-> - Demo video covering the requested scenarios
->
-> Repository access has been granted to the requested GitHub users.
->
-> Thank you for the opportunity.
-
----
-
-# 13. Important GitHub submission rule
-
-Before pushing:
+Then keep the worker running:
 
 ```bash
-git status
+npm run worker
 ```
 
-Make sure you **do not see**:
+The expected flow is:
 
 ```text
-backend/.env
-frontend/.env
-node_modules/
+Email created
+      ↓
+MongoDB record created
+      ↓
+BullMQ job added
+      ↓
+Redis stores delayed job
+      ↓
+Scheduled time reached
+      ↓
+Worker processes job
+      ↓
+Nodemailer sends email
+      ↓
+Email status updated
+      ↓
+Ethereal preview available
 ```
 
-Then:
+---
 
-```bash
-git add .
-git commit -m "feat: complete email scheduler assignment"
-git branch -M main
-git remote add origin YOUR_PRIVATE_REPOSITORY_URL
-git push -u origin main
-```
+# Notes
 
-**Do not put Ethereal passwords, JWT secrets, Mongo credentials, or Redis credentials into GitHub.** Use `.env.example` with placeholders only.
+* The `.env` file should never be committed to GitHub.
+* Use `.env.example` to document required environment variables.
+* Ethereal is intended for development/testing and does not function as a normal production mailbox.
+* The BullMQ worker must be running for scheduled jobs to be processed.
+* Redis and MongoDB must be available before starting the backend and worker.
+
+---
+
+# Project Goal
+
+The main goal of this project was to build a reliable email scheduling workflow where API requests, persistence, queue management, and email delivery are separated into independent components.
+
+Using BullMQ and Redis for background scheduling keeps the API responsive, while MongoDB provides persistent application data and a dedicated worker handles the actual email delivery.
